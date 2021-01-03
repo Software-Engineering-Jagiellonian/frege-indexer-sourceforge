@@ -1,14 +1,16 @@
-import os
-import sys
-import time
-
-import pika as pika
-import requests
-import re
-from bs4 import BeautifulSoup
-import json
 import itertools
-from db_manager import DbManager
+import os
+import re
+import sys
+from typing import Optional
+
+import requests
+from bs4 import BeautifulSoup
+from fregeindexerlib.crawl_result import CrawlResult
+from fregeindexerlib.database_connection import DatabaseConnectionParameters
+from fregeindexerlib.indexer import Indexer
+from fregeindexerlib.indexer_type import IndexerType
+from fregeindexerlib.rabbitmq_connection import RabbitMQConnectionParameters
 
 
 class SinglePageProjectsExtractor:
@@ -23,7 +25,7 @@ class SinglePageProjectsExtractor:
 
         if response.status_code == 404:
             print('Response returned 404 Not Found - end of scrapping')
-            sys.exit(0)
+            return None
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -123,99 +125,35 @@ class SingleProjectGitLinkExtractor:
 class SingleProjectRabbitMQMessageBuilder:
 
     @staticmethod
-    def build(project_name, git_url):
+    def build(code_url, project_name, git_url):
         if not project_name or not git_url:
             return
 
         message = dict()
 
-        message['repo_id'] = f'sourceforge-{project_name}'
+        message['repo_url'] = f'https://sourceforge.net/{code_url}'
+        message['repo_id'] = project_name
         message['git_url'] = git_url
 
-        return json.dumps(message)
-
-
-class SingleProjectDatabaseEntryBuilder:
-
-    @staticmethod
-    def build(project_name, git_url):
-        if not project_name or not git_url:
-            return
-
-        entry = dict()
-
-        entry['repo_id'] = f'sourceforge-{project_name}'
-        entry['git_url'] = git_url
-        entry['repo_url'] = f'https://sourceforge.net/p/{project_name}'
-
-        return entry
-
-
-class RabbitMQConnectionHandler:
-
-    @staticmethod
-    def connect(rabbitmq_host, rabbitmq_port, queue_name):
-        while True:
-            try:
-                print(f'Connecting to RabbitMQ ({rabbitmq_host}:{rabbitmq_port})')
-                connection = pika.BlockingConnection(pika.ConnectionParameters(host=rabbitmq_host, port=rabbitmq_port))
-                channel = connection.channel()
-                channel.confirm_delivery()
-                channel.queue_declare(queue=queue_name, durable=True)
-
-                print('Connected')
-                return channel
-            except pika.exceptions.AMQPConnectionError as exception:
-                print(f'AMQP Connection Error: {exception}')
-                print('Sleeping for 10 seconds and retrying')
-                time.sleep(10)
-            except KeyboardInterrupt:
-                print('Exiting')
-                try:
-                    connection.close()
-                except NameError:
-                    pass
-                sys.exit(0)
-
-
-class RabbitMQMessagePublisher:
-
-    @staticmethod
-    def publish(channel, payload):
-        if not payload:
-            return
-        while True:
-            try:
-                print(f'Publishing message: {payload} to RabbitMQ')
-                channel.basic_publish(exchange='',
-                                      routing_key=queue,
-                                      properties=pika.BasicProperties(delivery_mode=2),  # make message persistent
-                                      body=bytes(payload, encoding='utf8'))
-                print("Message was received by RabbitMQ")
-                break
-            except pika.exceptions.NackError:
-                print("Message was REJECTED by RabbitMQ, sleeping for 10 seconds")
-                time.sleep(10)
+        return message
 
 
 singlePageProjectsExtractor = SinglePageProjectsExtractor()
 singleProjectCodeUrlExtractor = SingleProjectCodeUrlExtractor()
 singleProjectGitLinkExtractor = SingleProjectGitLinkExtractor()
 singleProjectRabbitMQMessageBuilder = SingleProjectRabbitMQMessageBuilder()
-rabbitMQMessagePublisher = RabbitMQMessagePublisher()
-rabbitMQConnectionHandler = RabbitMQConnectionHandler()
 singleProjectResponseExtractor = SingleProjectResponseExtractor()
 singleProjectGitUrlExtractor = SingleProjectGitUrlExtractor()
-singleProjectDatabaseEntryBuilder = SingleProjectDatabaseEntryBuilder()
-dbManager = DbManager()
 
 
-def run(rabbitmq_host, rabbitmq_port, queue_name):
+def run():
     while True:
-        channel = rabbitMQConnectionHandler.connect(rabbitmq_host, rabbitmq_port, queue_name)
-
         for i in itertools.count(start=1):
-            for project_name in singlePageProjectsExtractor.extract(i):
+            projects = singlePageProjectsExtractor.extract(i)
+            if not projects:
+                yield None
+
+            for project_name in projects:
                 single_project_soup = singleProjectResponseExtractor.extract(project_name)
 
                 project_code_url = singleProjectCodeUrlExtractor.extract(single_project_soup)
@@ -226,14 +164,13 @@ def run(rabbitmq_host, rabbitmq_port, queue_name):
 
                 for url in projects_url:
                     git_url = singleProjectGitLinkExtractor.extract(url)
-                    payload = singleProjectRabbitMQMessageBuilder.build(url[2:], git_url)
-                    rabbitMQMessagePublisher.publish(channel, payload)
-
-                    entry = singleProjectDatabaseEntryBuilder.build(url[2:], git_url)
-                    dbManager.save_repository(entry)
+                    if git_url:
+                        payload = singleProjectRabbitMQMessageBuilder.build(url, url[2:], git_url)
+                        yield payload
 
 
 if __name__ == '__main__':
+
     try:
         rabbitmq_host = os.environ['RABBITMQ_HOST']
     except KeyError:
@@ -252,6 +189,25 @@ if __name__ == '__main__':
         print("Destination queue must be provided as QUEUE environment var!")
         sys.exit(3)
 
-    # todo - jakoś chyba by się przydalo zapisywac stan w jakim jestesmy (numer strony?) zeby w razie czego nie
-    #  zaczynac od nowa -- nice to have not required
-    run(rabbitmq_host, rabbitmq_port, queue)
+
+    class SourceforgeIndexer(Indexer):
+        def crawl_next_repository(self, prev_repository_id: Optional[str]) -> Optional[CrawlResult]:
+            result = next(sourceforge_iterator)
+            print(result)
+            return CrawlResult(
+                result['repo_id'],
+                result['repo_url'],
+                result['git_url'],
+                None)
+
+
+    sourceforge_iterator = run()
+
+    rabbit = RabbitMQConnectionParameters(host=rabbitmq_host, port=rabbitmq_port)
+    database = DatabaseConnectionParameters(host="localhost", database="frege",
+                                            username="postgres", password="admin")
+
+    app = SourceforgeIndexer(indexer_type=IndexerType.SOURCEFORGE, rabbitmq_parameters=rabbit,
+                             database_parameters=database, rejected_publish_delay=10)
+
+    app.run()
