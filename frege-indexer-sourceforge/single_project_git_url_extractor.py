@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 
+from logger import logger
+
 
 class SingleProjectGitUrlExtractor:
 
@@ -9,7 +11,7 @@ class SingleProjectGitUrlExtractor:
         if not soup:
             return
 
-        print('Looking for project children (GIT)')
+        logger.info('Looking for project children (GIT)')
         code_urls = set()
         for li in soup.find_all('ul', {'class': 'dropdown'})[0]('li'):
             try:
@@ -19,7 +21,7 @@ class SingleProjectGitUrlExtractor:
                     if href_link.startswith('/p'):
                         url = f'https://sourceforge.net/{href_link[1:]}'
 
-                        print(f'Found project GIT children on {url}, scrapping')
+                        logger.info(f'Found project GIT children on {url}, scrapping')
                         response = requests.get(url)
                         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -31,5 +33,5 @@ class SingleProjectGitUrlExtractor:
                 pass
 
         if code_urls:
-            print(f'Found project GIT children: {code_urls}')
+            logger.info(f'Found project GIT children: {code_urls}')
         return code_urls

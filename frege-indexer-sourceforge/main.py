@@ -6,10 +6,11 @@ from fregeindexerlib.database_connection import DatabaseConnectionParameters
 from fregeindexerlib.indexer_type import IndexerType
 from fregeindexerlib.rabbitmq_connection import RabbitMQConnectionParameters
 
-from single_project_git_url_extractor import SingleProjectGitUrlExtractor
+from logger import logger
 from single_page_projects_extractor import SinglePageProjectsExtractor
 from single_project_code_url_exctractor import SingleProjectCodeUrlExtractor
 from single_project_git_link_extractor import SingleProjectGitLinkExtractor
+from single_project_git_url_extractor import SingleProjectGitUrlExtractor
 from single_project_message_builder import SingleProjectRabbitMQMessageBuilder
 from single_project_response_extractor import SingleProjectResponseExtractor
 from source_forge_indexer import SourceforgeIndexer
@@ -36,7 +37,7 @@ def run():
                 project_git_ulr = singleProjectGitUrlExtractor.extract(single_project_soup)
 
                 projects_url = project_git_ulr | project_code_url
-                print(f'Project {project_name} has children: {projects_url}')
+                logger.info(f'Project {project_name} has children: {projects_url}')
 
                 for url in projects_url:
                     git_url = singleProjectGitLinkExtractor.extract(url)
@@ -49,7 +50,7 @@ def parse_environment(variable, optional=False, optional_value=None):
     try:
         return os.environ.get(variable, optional_value) if optional else os.environ[variable]
     except KeyError:
-        print(f'{variable} in environment var must be provided!')
+        logger.error(f'{variable} in environment var must be provided!')
         sys.exit(1)
 
 
