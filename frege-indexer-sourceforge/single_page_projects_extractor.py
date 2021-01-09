@@ -3,6 +3,8 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
+from logger import logger
+
 
 class SinglePageProjectsExtractor:
 
@@ -11,11 +13,11 @@ class SinglePageProjectsExtractor:
         if page_number <= 0:
             return
         url = f'https://sourceforge.net/directory/?sort=popular&page={page_number}'
-        print(f'Scrapping: {url}')
+        logger.info(f'Scrapping: {url}')
         response = requests.get(url)
 
         if response.status_code == 404:
-            print('Response returned 404 Not Found - end of scrapping')
+            logger.info('Response returned 404 Not Found - end of scrapping')
             return None
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -24,5 +26,5 @@ class SinglePageProjectsExtractor:
         for link in soup.find_all('a', href=re.compile(r'/projects/\w+')):
             projects_set.add('/'.join(link['href'].split('/')[:3])[1:])
 
-        print(f'Found projects: {projects_set}')
+        logger.info(f'Found projects: {projects_set}')
         return projects_set

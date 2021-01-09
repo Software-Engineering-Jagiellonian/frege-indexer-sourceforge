@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 
+from logger import logger
+
 
 class SingleProjectResponseExtractor:
 
@@ -10,6 +12,6 @@ class SingleProjectResponseExtractor:
             return
 
         url = f'https://sourceforge.net/{project_name}'
-        print(f'Getting project from: {url}')
+        logger.info(f'Getting project from: {url}')
         response = requests.get(url)
         return BeautifulSoup(response.text, 'html.parser')

@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 
+from logger import logger
+
 
 class SingleProjectGitLinkExtractor:
 
@@ -10,7 +12,7 @@ class SingleProjectGitLinkExtractor:
             return
 
         url = f'https://sourceforge.net/{code_url}'
-        print(f'Looking for git clone url on {url}')
+        logger.info(f'Looking for git clone url on {url}')
         response = requests.get(url)
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -19,5 +21,5 @@ class SingleProjectGitLinkExtractor:
             value = value.get('value')
             if value.startswith('git clone'):
                 git_link = value.split()[2]
-                print(f'Found git clone link: {git_link}')
+                logger.info(f'Found git clone link: {git_link}')
                 return git_link
